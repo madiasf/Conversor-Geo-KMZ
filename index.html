@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor Geo KMZ - Serviço Web</title>
+    <!-- Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Biblioteca SheetJS (xlsx) para ler e escrever ficheiros Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Biblioteca Proj4JS para conversão de coordenadas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <!-- Biblioteca JSZip para criar o ficheiro .kmz -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Evita barras de rolagem desnecessárias */
+        }
+        /* Estilo para o menu suspenso */
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: #f9f9f9;
+            min-width: 200px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1;
+        }
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-200">
+
+    <!-- Estrutura principal que imita a aplicação de desktop -->
+    <div class="flex flex-col h-full">
+        <!-- Barra de Menu Superior -->
+        <nav class="bg-white shadow-md w-full">
+            <div class="flex items-center px-4 py-1">
+                <!-- Menu Arquivo -->
+                <div class="dropdown inline-block relative py-2 pr-4 hover:bg-gray-100 cursor-pointer">
+                    <span>Arquivo</span>
+                    <ul class="dropdown-content text-gray-700 pt-1">
+                        <li><a id="menu-select-file" class="rounded-t bg-gray-200 hover:bg-gray-300 py-2 px-4 block whitespace-no-wrap" href="#">Selecionar Arquivo Excel...</a></li>
+                        <li><a id="menu-exit" class="bg-gray-200 hover:bg-gray-300 py-2 px-4 block whitespace-no-wrap" href="#">Sair (Atualizar Página)</a></li>
+                    </ul>
+                </div>
+                <!-- Menu Ajuda -->
+                <div class="dropdown inline-block relative px-4 py-2 hover:bg-gray-100 cursor-pointer">
+                    <span>Ajuda</span>
+                    <ul class="dropdown-content text-gray-700 pt-1">
+                        <li><a id="menu-about" class="rounded-t bg-gray-200 hover:bg-gray-300 py-2 px-4 block whitespace-no-wrap" href="#">Sobre...</a></li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Conteúdo Principal com Duas Colunas -->
+        <main class="flex flex-grow overflow-hidden">
+            <!-- Coluna da Esquerda (Controles) -->
+            <div class="w-1/3 min-w-[450px] bg-gray-50 flex flex-col p-6 overflow-y-auto">
+                <h1 class="text-3xl font-bold text-gray-800 mb-6">Conversor Geo KMZ</h1>
+                
+                <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-4">
+                    <label for="epsg-input" class="block text-md font-medium text-gray-700">Código EPSG de Origem:</label>
+                    <input type="text" id="epsg-input" placeholder="Consulte o mapa ao lado" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    <p class="text-sm text-gray-500 mt-2">O Excel deve conter as colunas 'longitude' e 'latitude'.</p>
+                </div>
+
+                <label for="file-input" class="w-full text-center bg-blue-600 text-white font-bold py-2 px-4 rounded-md hover:bg-blue-700 cursor-pointer transition mb-2">
+                    Selecionar Arquivo Excel...
+                </label>
+                <input type="file" id="file-input" class="hidden" accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+                <div id="file-path-label" class="text-center text-sm text-gray-600 bg-gray-200 p-2 rounded-md truncate">Nenhum ficheiro selecionado.</div>
+
+                <button id="convert-button" class="w-full bg-indigo-600 text-white font-bold py-3 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition mt-6 disabled:bg-gray-400">
+                    Converter e Gerar Arquivos
+                </button>
+
+                <div class="mt-6 flex-grow flex flex-col">
+                    <label class="text-md font-medium text-gray-700">Status:</label>
+                    <textarea id="status-box" class="w-full flex-grow mt-1 p-2 border border-gray-300 rounded-md bg-gray-50 text-sm" readonly></textarea>
+                </div>
+            </div>
+
+            <!-- Coluna da Direita (Imagem) -->
+            <div class="w-2/3 bg-gray-300 flex items-center justify-center p-6 overflow-hidden">
+                <!-- MODIFICAÇÃO: O 'src' agora aponta para um ficheiro local que será carregado para o GitHub -->
+                <img id="background-image" src="./background.jpg" alt="Mapa de referência com tabela de códigos EPSG" class="max-w-full max-h-full object-contain">
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal "Sobre" -->
+    <div id="about-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-20 hidden">
+        <div class="bg-white p-8 rounded-lg shadow-xl max-w-sm w-full">
+            <h2 class="text-xl font-bold mb-4">Sobre o Conversor Geo KMZ</h2>
+            <p class="text-gray-700 mb-4">Conversor Geo KMZ v1.0 (Web)<br><br>Este serviço web converte coordenadas de arquivos Excel para o formato KMZ, gerando pontos e polígonos para visualização no Google Earth.</p>
+            <button id="close-modal-button" class="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700">Fechar</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Referências aos Elementos do DOM ---
+        const fileInput = document.getElementById('file-input');
+        const menuSelectFile = document.getElementById('menu-select-file');
+        const convertButton = document.getElementById('convert-button');
+        const filePathLabel = document.getElementById('file-path-label');
+        const epsgInput = document.getElementById('epsg-input');
+        const statusBox = document.getElementById('status-box');
+        
+        const menuExit = document.getElementById('menu-exit');
+        const menuAbout = document.getElementById('menu-about');
+        const aboutModal = document.getElementById('about-modal');
+        const closeModalButton = document.getElementById('close-modal-button');
+
+        let uploadedFile = null;
+
+        // --- Lógica da Aplicação ---
+
+        function logStatus(message) {
+            statusBox.value += message + '\n';
+            statusBox.scrollTop = statusBox.scrollHeight;
+        }
+
+        function clearLog() {
+            statusBox.value = '';
+        }
+
+        function handleFileSelection(event) {
+            const file = event.target.files[0];
+            if (file) {
+                uploadedFile = file;
+                filePathLabel.textContent = file.name;
+                filePathLabel.classList.remove('text-gray-600');
+                filePathLabel.classList.add('text-green-700');
+            }
+        }
+
+        // --- Event Listeners ---
+
+        fileInput.addEventListener('change', handleFileSelection);
+        menuSelectFile.addEventListener('click', (e) => {
+            e.preventDefault();
+            fileInput.click();
+        });
+
+        menuExit.addEventListener('click', () => window.location.reload());
+        menuAbout.addEventListener('click', () => aboutModal.classList.remove('hidden'));
+        closeModalButton.addEventListener('click', () => aboutModal.classList.add('hidden'));
+
+        convertButton.addEventListener('click', async () => {
+            if (!uploadedFile) {
+                logStatus("ERRO: Por favor, selecione um ficheiro Excel.");
+                return;
+            }
+            const epsgCode = epsgInput.value.trim();
+            if (!epsgCode || !/^\d+$/.test(epsgCode)) {
+                logStatus("ERRO: Por favor, insira um código EPSG válido.");
+                return;
+            }
+
+            convertButton.disabled = true;
+            convertButton.textContent = "Processando...";
+            clearLog();
+            logStatus("A iniciar processo...");
+
+            try {
+                // Ler o ficheiro Excel
+                logStatus(`A ler ficheiro: ${uploadedFile.name}`);
+                const data = await uploadedFile.arrayBuffer();
+                const workbook = XLSX.read(data);
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+                if (jsonData.length === 0) throw new Error("O ficheiro Excel parece estar vazio.");
+
+                // Validar colunas
+                const requiredColumns = ["longitude", "latitude"];
+                const firstRowColumns = Object.keys(jsonData[0]);
+                if (!requiredColumns.every(col => firstRowColumns.includes(col))) {
+                    throw new Error("Colunas 'longitude' e/ou 'latitude' não encontradas!");
+                }
+                
+                // Converter coordenadas
+                logStatus(`A iniciar conversão usando EPSG:${epsgCode}...`);
+                const crsOrigem = `EPSG:${epsgCode}`;
+                const crsDestino = "EPSG:4326"; // WGS84
+                let convertedData = [];
+
+                for (const row of jsonData) {
+                    let newRow = { ...row };
+                    try {
+                        const coords = proj4(crsOrigem, crsDestino, [row.longitude, row.latitude]);
+                        newRow.Longitude_WGS84 = coords[0];
+                        newRow.Latitude_WGS84 = coords[1];
+                    } catch (e) {
+                        newRow.Longitude_WGS84 = 'ERRO';
+                        newRow.Latitude_WGS84 = 'ERRO';
+                        logStatus(`Aviso: Falha ao converter a linha com coords (${row.longitude}, ${row.latitude})`);
+                    }
+                    convertedData.push(newRow);
+                }
+                logStatus("Conversão finalizada.");
+                
+                // Gerar ficheiros e iniciar download
+                const baseName = uploadedFile.name.replace(/\.[^/.]+$/, "");
+                generateAndDownloadExcel(convertedData, baseName);
+                await generateAndDownloadKmz(convertedData, baseName);
+                
+                logStatus("\nProcesso concluído com sucesso!");
+
+            } catch (error) {
+                logStatus(`ERRO CRÍTICO: ${error.message}`);
+            } finally {
+                convertButton.disabled = false;
+                convertButton.textContent = "Converter e Gerar Arquivos";
+            }
+        });
+
+        function triggerDownload(blob, fileName) {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+        }
+        
+        function generateAndDownloadExcel(data, baseName) {
+            logStatus("A gerar ficheiro Excel...");
+            const newWorksheet = XLSX.utils.json_to_sheet(data);
+            const newWorkbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Convertido');
+            const excelBuffer = XLSX.write(newWorkbook, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            triggerDownload(blob, `${baseName}_CONVERTIDO.xlsx`);
+            logStatus("✔ Ficheiro Excel gerado.");
+        }
+
+        async function generateAndDownloadKmz(data, baseName) {
+            logStatus("A gerar ficheiro KMZ...");
+            let kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${baseName}</name>`;
+
+            const validPoints = data.filter(row => typeof row.Longitude_WGS84 === 'number' && typeof row.Latitude_WGS84 === 'number');
+            
+            // Pontos individuais
+            validPoints.forEach((row, i) => {
+                const name = `Ponto ${i + 1}`;
+                kmlContent += `
+    <Placemark>
+      <name>${name}</name>
+      <Point><coordinates>${row.Longitude_WGS84},${row.Latitude_WGS84},0</coordinates></Point>
+    </Placemark>`;
+            });
+
+            // Polígono
+            if (validPoints.length >= 3) {
+                const coordsString = validPoints.map(p => `${p.Longitude_WGS84},${p.Latitude_WGS84},0`).join(' ');
+                kmlContent += `
+    <Placemark>
+      <name>Polígono da Área</name>
+      <Style>
+        <LineStyle><color>ff0000ff</color><width>3</width></LineStyle>
+        <PolyStyle><color>7fff0000</color></PolyStyle>
+      </Style>
+      <Polygon><outerBoundaryIs><LinearRing><coordinates>${coordsString}</coordinates></LinearRing></outerBoundaryIs></Polygon>
+    </Placemark>`;
+            }
+
+            kmlContent += `
+  </Document>
+</kml>`;
+
+            const zip = new JSZip();
+            zip.file("doc.kml", kmlContent);
+            const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+            triggerDownload(blob, `${baseName}_PONTOS_E_POLIGONO.kmz`);
+            logStatus("✔ Ficheiro KMZ gerado.");
+        }
+    </script>
+</body>
+</html>
+```
+
+
+
+### Pré-requisitos
+* Uma conta no [GitHub](https://github.com/).
+* O ficheiro HTML da aplicação (use o código do cartão acima).
+* A sua imagem de referência (`background.jpg`).
+
+---
+
+### Passo 1: Criar um Novo Repositório
+
+1.  Aceda à sua página inicial do GitHub e clique em **"New"**.
+2.  Dê um nome ao repositório (ex: `conversor-geo-kmz`).
+3.  Verifique se está **Público (Public)**.
+4.  Clique em **"Create repository"**.
+
+---
+
+### Passo 2: Carregar os Ficheiros do Projeto (A Etapa Crucial)
+
+Agora, vamos colocar **ambos os ficheiros** (HTML e a imagem) no seu repositório.
+
+1.  Dentro do seu novo repositório, clique em **"Add file"** > **"Upload files"**.
+2.  **Arraste e largue os DOIS ficheiros** para a área de upload:
+    * O seu ficheiro HTML.
+    * O seu ficheiro de imagem `background.jpg`.
+3.  **(MUITO IMPORTANTE)** Depois de carregar o ficheiro HTML, **renomeie-o para `index.html`**. Este é o nome padrão que o GitHub Pages procura e torna o seu link mais simples.
+4.  No final da página, clique no botão verde **"Commit changes"** para salvar os ficheiros.
+
+![Imagem de como carregar múltiplos ficheiros para o GitHub](https://i.imgur.com/gYqgqQp.png)
+
+---
+
+### Passo 3: Ativar o GitHub Pages
+
+1.  No seu repositório, vá a **"Settings"** (Configurações) > **"Pages"** (Páginas).
+2.  Em "Source" (Fonte), selecione **"Deploy from a branch"**.
+3.  Na secção "Branch", escolha o branch **`main`**, a pasta **`/(root)`** e clique em **"Save"**.
+
+---
+
+### Passo 4: Aceder ao seu Site
+
+1.  Aguarde um ou dois minutos. A página irá mostrar uma caixa com o link do seu site.
+2.  O seu link será: `https://seu-nome-de-usuario.github.io/nome-do-repositorio/`
+3.  Aceda ao link e o seu site, com a imagem, deverá estar a funcionar perfeitamen
